@@ -16,7 +16,6 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.paginator import Page
 from django.http.multipartparser import parse_header
 from django.template import engines, loader
-from django.test.client import encode_multipart
 from django.urls import NoReverseMatch
 from django.utils.html import mark_safe
 
@@ -88,7 +87,7 @@ class JSONRenderer(BaseRenderer):
         Render `data` into JSON, returning a bytestring.
         """
         if data is None:
-            return bytes()
+            return b''
 
         renderer_context = renderer_context or {}
         indent = self.get_indent(accepted_media_type, renderer_context)
@@ -604,10 +603,13 @@ class BrowsableAPIRenderer(BaseRenderer):
     def get_breadcrumbs(self, request):
         return get_breadcrumbs(request.path, request)
 
-    def get_extra_actions(self, view):
-        if hasattr(view, 'get_extra_action_url_map'):
-            return view.get_extra_action_url_map()
-        return None
+    def get_extra_actions(self, view, status_code):
+        if (status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)):
+            return None
+        elif not hasattr(view, 'get_extra_action_url_map'):
+            return None
+
+        return view.get_extra_action_url_map()
 
     def get_filter_form(self, data, view, request):
         if not hasattr(view, 'get_queryset') or not hasattr(view, 'filter_backends'):
@@ -695,7 +697,7 @@ class BrowsableAPIRenderer(BaseRenderer):
             'delete_form': self.get_rendered_html_form(data, view, 'DELETE', request),
             'options_form': self.get_rendered_html_form(data, view, 'OPTIONS', request),
 
-            'extra_actions': self.get_extra_actions(view),
+            'extra_actions': self.get_extra_actions(view, response.status_code),
 
             'filter_form': self.get_filter_form(data, view, request),
 
@@ -899,6 +901,8 @@ class MultiPartRenderer(BaseRenderer):
     BOUNDARY = 'BoUnDaRyStRiNg'
 
     def render(self, data, accepted_media_type=None, renderer_context=None):
+        from django.test.client import encode_multipart
+
         if hasattr(data, 'items'):
             for key, value in data.items():
                 assert not isinstance(value, dict), (
@@ -1049,7 +1053,11 @@ class OpenAPIRenderer(BaseRenderer):
         assert yaml, 'Using OpenAPIRenderer, but `pyyaml` is not installed.'
 
     def render(self, data, media_type=None, renderer_context=None):
-        return yaml.dump(data, default_flow_style=False).encode('utf-8')
+        # disable yaml advanced feature 'alias' for clean, portable, and readable output
+        class Dumper(yaml.Dumper):
+            def ignore_aliases(self, data):
+                return True
+        return yaml.dump(data, default_flow_style=False, sort_keys=False, Dumper=Dumper).encode('utf-8')
 
 
 class JSONOpenAPIRenderer(BaseRenderer):

@@ -25,11 +25,12 @@ from django.utils.decorators import classonlymethod
 from django.views.decorators.csrf import csrf_exempt
 
 from rest_framework import generics, mixins, views
+from rest_framework.decorators import MethodMapper
 from rest_framework.reverse import reverse
 
 
 def _is_extra_action(attr):
-    return hasattr(attr, 'mapping')
+    return hasattr(attr, 'mapping') and isinstance(attr.mapping, MethodMapper)
 
 
 class ViewSetMixin:
@@ -53,7 +54,7 @@ class ViewSetMixin:
         and slightly modify the view function that is created and returned.
         """
         # The name and description initkwargs may be explicitly overridden for
-        # certain route confiugurations. eg, names of extra actions.
+        # certain route configurations. eg, names of extra actions.
         cls.name = None
         cls.description = None
 
@@ -92,6 +93,10 @@ class ViewSetMixin:
 
         def view(request, *args, **kwargs):
             self = cls(**initkwargs)
+
+            if 'get' in actions and 'head' not in actions:
+                actions['head'] = actions['get']
+
             # We also store the mapping of request methods to actions,
             # so that we can later set the action attribute.
             # eg. `self.action = 'list'` on an incoming GET request.
@@ -102,9 +107,6 @@ class ViewSetMixin:
             for method, action in actions.items():
                 handler = getattr(self, action)
                 setattr(self, method, handler)
-
-            if hasattr(self, 'get') and not hasattr(self, 'head'):
-                self.head = self.get
 
             self.request = request
             self.args = args

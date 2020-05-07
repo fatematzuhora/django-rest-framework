@@ -7,7 +7,7 @@ from django.db import connection, models, transaction
 from django.http import Http404
 from django.http.response import HttpResponseBase
 from django.utils.cache import cc_delim_re, patch_vary_headers
-from django.utils.encoding import smart_text
+from django.utils.encoding import smart_str
 from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import View
 
@@ -56,7 +56,7 @@ def get_view_description(view, html=False):
     if description is None:
         description = view.__class__.__doc__ or ''
 
-    description = formatting.dedent(smart_text(description))
+    description = formatting.dedent(smart_str(description))
     if html:
         return formatting.markup_description(description)
     return description
@@ -166,13 +166,13 @@ class APIView(View):
         """
         raise exceptions.MethodNotAllowed(request.method)
 
-    def permission_denied(self, request, message=None):
+    def permission_denied(self, request, message=None, code=None):
         """
         If request is not permitted, determine what kind of exception to raise.
         """
         if request.authenticators and not request.successful_authenticator:
             raise exceptions.NotAuthenticated()
-        raise exceptions.PermissionDenied(detail=message)
+        raise exceptions.PermissionDenied(detail=message, code=code)
 
     def throttled(self, request, wait):
         """
@@ -331,7 +331,9 @@ class APIView(View):
         for permission in self.get_permissions():
             if not permission.has_permission(request, self):
                 self.permission_denied(
-                    request, message=getattr(permission, 'message', None)
+                    request,
+                    message=getattr(permission, 'message', None),
+                    code=getattr(permission, 'code', None)
                 )
 
     def check_object_permissions(self, request, obj):
@@ -342,7 +344,9 @@ class APIView(View):
         for permission in self.get_permissions():
             if not permission.has_object_permission(request, self, obj):
                 self.permission_denied(
-                    request, message=getattr(permission, 'message', None)
+                    request,
+                    message=getattr(permission, 'message', None),
+                    code=getattr(permission, 'code', None)
                 )
 
     def check_throttles(self, request):
@@ -350,9 +354,21 @@ class APIView(View):
         Check if request should be throttled.
         Raises an appropriate exception if the request is throttled.
         """
+        throttle_durations = []
         for throttle in self.get_throttles():
             if not throttle.allow_request(request, self):
-                self.throttled(request, throttle.wait())
+                throttle_durations.append(throttle.wait())
+
+        if throttle_durations:
+            # Filter out `None` values which may happen in case of config / rate
+            # changes, see #1438
+            durations = [
+                duration for duration in throttle_durations
+                if duration is not None
+            ]
+
+            duration = max(durations, default=None)
+            self.throttled(request, duration)
 
     def determine_version(self, request, *args, **kwargs):
         """

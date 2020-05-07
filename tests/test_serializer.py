@@ -317,7 +317,8 @@ class TestBaseSerializer:
 
 class TestStarredSource:
     """
-    Tests for `source='*'` argument, which is used for nested representations.
+    Tests for `source='*'` argument, which is often used for complex field or
+    nested representations.
 
     For example:
 
@@ -337,11 +338,28 @@ class TestStarredSource:
             c = serializers.IntegerField()
             d = serializers.IntegerField()
 
-        class TestSerializer(serializers.Serializer):
+        class NestedBaseSerializer(serializers.Serializer):
             nested1 = NestedSerializer1(source='*')
             nested2 = NestedSerializer2(source='*')
 
-        self.Serializer = TestSerializer
+        # nullable nested serializer testing
+        class NullableNestedSerializer(serializers.Serializer):
+            nested = NestedSerializer1(source='*', allow_null=True)
+
+        # nullable custom field testing
+        class CustomField(serializers.Field):
+            def to_representation(self, instance):
+                return getattr(instance, 'foo', None)
+
+            def to_internal_value(self, data):
+                return {'foo': data}
+
+        class NullableFieldSerializer(serializers.Serializer):
+            field = CustomField(source='*', allow_null=True)
+
+        self.Serializer = NestedBaseSerializer
+        self.NullableNestedSerializer = NullableNestedSerializer
+        self.NullableFieldSerializer = NullableFieldSerializer
 
     def test_nested_validate(self):
         """
@@ -356,6 +374,12 @@ class TestStarredSource:
             'd': 4
         }
 
+    def test_nested_null_validate(self):
+        serializer = self.NullableNestedSerializer(data={'nested': None})
+
+        # validation should fail (but not error) since nested fields are required
+        assert not serializer.is_valid()
+
     def test_nested_serialize(self):
         """
         An object can be serialized into a nested representation.
@@ -363,6 +387,20 @@ class TestStarredSource:
         instance = {'a': 1, 'b': 2, 'c': 3, 'd': 4}
         serializer = self.Serializer(instance)
         assert serializer.data == self.data
+
+    def test_field_validate(self):
+        serializer = self.NullableFieldSerializer(data={'field': 'bar'})
+
+        # validation should pass since no internal validation
+        assert serializer.is_valid()
+        assert serializer.validated_data == {'foo': 'bar'}
+
+    def test_field_null_validate(self):
+        serializer = self.NullableFieldSerializer(data={'field': None})
+
+        # validation should pass since no internal validation
+        assert serializer.is_valid()
+        assert serializer.validated_data == {'foo': None}
 
 
 class TestIncorrectlyConfigured:
@@ -517,7 +555,7 @@ class TestDefaultOutput:
             bar = serializers.CharField(source='foo.bar', allow_null=True)
             optional = serializers.CharField(required=False, allow_null=True)
 
-        # allow_null=True should imply default=None when serialising:
+        # allow_null=True should imply default=None when serializing:
         assert Serializer({'foo': None}).data == {'foo': None, 'bar': None, 'optional': None, }
 
 
@@ -644,3 +682,53 @@ class TestDeclaredFieldInheritance:
         assert len(Parent().get_fields()) == 2
         assert len(Child().get_fields()) == 2
         assert len(Grandchild().get_fields()) == 2
+
+    def test_multiple_inheritance(self):
+        class A(serializers.Serializer):
+            field = serializers.CharField()
+
+        class B(serializers.Serializer):
+            field = serializers.IntegerField()
+
+        class TestSerializer(A, B):
+            pass
+
+        fields = {
+            name: type(f) for name, f
+            in TestSerializer()._declared_fields.items()
+        }
+        assert fields == {
+            'field': serializers.CharField,
+        }
+
+    def test_field_ordering(self):
+        class Base(serializers.Serializer):
+            f1 = serializers.CharField()
+            f2 = serializers.CharField()
+
+        class A(Base):
+            f3 = serializers.IntegerField()
+
+        class B(serializers.Serializer):
+            f3 = serializers.CharField()
+            f4 = serializers.CharField()
+
+        class TestSerializer(A, B):
+            f2 = serializers.IntegerField()
+            f5 = serializers.CharField()
+
+        fields = {
+            name: type(f) for name, f
+            in TestSerializer()._declared_fields.items()
+        }
+
+        # `IntegerField`s should be the 'winners' in field name conflicts
+        # - `TestSerializer.f2` should override `Base.F2`
+        # - `A.f3` should override `B.f3`
+        assert fields == {
+            'f1': serializers.CharField,
+            'f2': serializers.IntegerField,
+            'f3': serializers.IntegerField,
+            'f4': serializers.CharField,
+            'f5': serializers.CharField,
+        }

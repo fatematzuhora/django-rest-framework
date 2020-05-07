@@ -9,7 +9,7 @@ from urllib import parse
 from django.core.paginator import InvalidPage
 from django.core.paginator import Paginator as DjangoPaginator
 from django.template import loader
-from django.utils.encoding import force_text
+from django.utils.encoding import force_str
 from django.utils.translation import gettext_lazy as _
 
 from rest_framework.compat import coreapi, coreschema
@@ -138,6 +138,9 @@ class BasePagination:
     def get_paginated_response(self, data):  # pragma: no cover
         raise NotImplementedError('get_paginated_response() must be implemented.')
 
+    def get_paginated_response_schema(self, schema):
+        return schema
+
     def to_html(self):  # pragma: no cover
         raise NotImplementedError('to_html() must be implemented to display page controls.')
 
@@ -222,6 +225,32 @@ class PageNumberPagination(BasePagination):
             ('results', data)
         ]))
 
+    def get_paginated_response_schema(self, schema):
+        return {
+            'type': 'object',
+            'properties': {
+                'count': {
+                    'type': 'integer',
+                    'example': 123,
+                },
+                'next': {
+                    'type': 'string',
+                    'nullable': True,
+                    'format': 'uri',
+                    'example': 'http://api.example.org/accounts/?{page_query_param}=4'.format(
+                        page_query_param=self.page_query_param)
+                },
+                'previous': {
+                    'type': 'string',
+                    'nullable': True,
+                    'format': 'uri',
+                    'example': 'http://api.example.org/accounts/?{page_query_param}=2'.format(
+                        page_query_param=self.page_query_param)
+                },
+                'results': schema,
+            },
+        }
+
     def get_page_size(self, request):
         if self.page_size_query_param:
             try:
@@ -286,7 +315,7 @@ class PageNumberPagination(BasePagination):
                 location='query',
                 schema=coreschema.Integer(
                     title='Page',
-                    description=force_text(self.page_query_description)
+                    description=force_str(self.page_query_description)
                 )
             )
         ]
@@ -298,7 +327,7 @@ class PageNumberPagination(BasePagination):
                     location='query',
                     schema=coreschema.Integer(
                         title='Page size',
-                        description=force_text(self.page_size_query_description)
+                        description=force_str(self.page_size_query_description)
                     )
                 )
             )
@@ -310,7 +339,7 @@ class PageNumberPagination(BasePagination):
                 'name': self.page_query_param,
                 'required': False,
                 'in': 'query',
-                'description': force_text(self.page_query_description),
+                'description': force_str(self.page_query_description),
                 'schema': {
                     'type': 'integer',
                 },
@@ -322,7 +351,7 @@ class PageNumberPagination(BasePagination):
                     'name': self.page_size_query_param,
                     'required': False,
                     'in': 'query',
-                    'description': force_text(self.page_size_query_description),
+                    'description': force_str(self.page_size_query_description),
                     'schema': {
                         'type': 'integer',
                     },
@@ -368,6 +397,32 @@ class LimitOffsetPagination(BasePagination):
             ('previous', self.get_previous_link()),
             ('results', data)
         ]))
+
+    def get_paginated_response_schema(self, schema):
+        return {
+            'type': 'object',
+            'properties': {
+                'count': {
+                    'type': 'integer',
+                    'example': 123,
+                },
+                'next': {
+                    'type': 'string',
+                    'nullable': True,
+                    'format': 'uri',
+                    'example': 'http://api.example.org/accounts/?{offset_param}=400&{limit_param}=100'.format(
+                        offset_param=self.offset_query_param, limit_param=self.limit_query_param),
+                },
+                'previous': {
+                    'type': 'string',
+                    'nullable': True,
+                    'format': 'uri',
+                    'example': 'http://api.example.org/accounts/?{offset_param}=200&{limit_param}=100'.format(
+                        offset_param=self.offset_query_param, limit_param=self.limit_query_param),
+                },
+                'results': schema,
+            },
+        }
 
     def get_limit(self, request):
         if self.limit_query_param:
@@ -478,7 +533,7 @@ class LimitOffsetPagination(BasePagination):
                 location='query',
                 schema=coreschema.Integer(
                     title='Limit',
-                    description=force_text(self.limit_query_description)
+                    description=force_str(self.limit_query_description)
                 )
             ),
             coreapi.Field(
@@ -487,7 +542,7 @@ class LimitOffsetPagination(BasePagination):
                 location='query',
                 schema=coreschema.Integer(
                     title='Offset',
-                    description=force_text(self.offset_query_description)
+                    description=force_str(self.offset_query_description)
                 )
             )
         ]
@@ -498,7 +553,7 @@ class LimitOffsetPagination(BasePagination):
                 'name': self.limit_query_param,
                 'required': False,
                 'in': 'query',
-                'description': force_text(self.limit_query_description),
+                'description': force_str(self.limit_query_description),
                 'schema': {
                     'type': 'integer',
                 },
@@ -507,7 +562,7 @@ class LimitOffsetPagination(BasePagination):
                 'name': self.offset_query_param,
                 'required': False,
                 'in': 'query',
-                'description': force_text(self.offset_query_description),
+                'description': force_str(self.offset_query_description),
                 'schema': {
                     'type': 'integer',
                 },
@@ -637,7 +692,7 @@ class CursorPagination(BasePagination):
         if not self.has_next:
             return None
 
-        if self.cursor and self.cursor.reverse and self.cursor.offset != 0:
+        if self.page and self.cursor and self.cursor.reverse and self.cursor.offset != 0:
             # If we're reversing direction and we have an offset cursor
             # then we cannot use the first position we find as a marker.
             compare = self._get_position_from_instance(self.page[-1], self.ordering)
@@ -645,12 +700,14 @@ class CursorPagination(BasePagination):
             compare = self.next_position
         offset = 0
 
+        has_item_with_unique_position = False
         for item in reversed(self.page):
             position = self._get_position_from_instance(item, self.ordering)
             if position != compare:
                 # The item in this position and the item following it
                 # have different positions. We can use this position as
                 # our marker.
+                has_item_with_unique_position = True
                 break
 
             # The item in this position has the same position as the item
@@ -659,7 +716,7 @@ class CursorPagination(BasePagination):
             compare = position
             offset += 1
 
-        else:
+        if self.page and not has_item_with_unique_position:
             # There were no unique positions in the page.
             if not self.has_previous:
                 # We are on the first page.
@@ -678,6 +735,9 @@ class CursorPagination(BasePagination):
                 offset = self.cursor.offset + self.page_size
                 position = self.previous_position
 
+        if not self.page:
+            position = self.next_position
+
         cursor = Cursor(offset=offset, reverse=False, position=position)
         return self.encode_cursor(cursor)
 
@@ -685,7 +745,7 @@ class CursorPagination(BasePagination):
         if not self.has_previous:
             return None
 
-        if self.cursor and not self.cursor.reverse and self.cursor.offset != 0:
+        if self.page and self.cursor and not self.cursor.reverse and self.cursor.offset != 0:
             # If we're reversing direction and we have an offset cursor
             # then we cannot use the first position we find as a marker.
             compare = self._get_position_from_instance(self.page[0], self.ordering)
@@ -693,12 +753,14 @@ class CursorPagination(BasePagination):
             compare = self.previous_position
         offset = 0
 
+        has_item_with_unique_position = False
         for item in self.page:
             position = self._get_position_from_instance(item, self.ordering)
             if position != compare:
                 # The item in this position and the item following it
                 # have different positions. We can use this position as
                 # our marker.
+                has_item_with_unique_position = True
                 break
 
             # The item in this position has the same position as the item
@@ -707,7 +769,7 @@ class CursorPagination(BasePagination):
             compare = position
             offset += 1
 
-        else:
+        if self.page and not has_item_with_unique_position:
             # There were no unique positions in the page.
             if not self.has_next:
                 # We are on the final page.
@@ -725,6 +787,9 @@ class CursorPagination(BasePagination):
                 # where we end up skipping back a few extra items.
                 offset = 0
                 position = self.next_position
+
+        if not self.page:
+            position = self.previous_position
 
         cursor = Cursor(offset=offset, reverse=True, position=position)
         return self.encode_cursor(cursor)
@@ -830,6 +895,22 @@ class CursorPagination(BasePagination):
             ('results', data)
         ]))
 
+    def get_paginated_response_schema(self, schema):
+        return {
+            'type': 'object',
+            'properties': {
+                'next': {
+                    'type': 'string',
+                    'nullable': True,
+                },
+                'previous': {
+                    'type': 'string',
+                    'nullable': True,
+                },
+                'results': schema,
+            },
+        }
+
     def get_html_context(self):
         return {
             'previous_url': self.get_previous_link(),
@@ -851,7 +932,7 @@ class CursorPagination(BasePagination):
                 location='query',
                 schema=coreschema.String(
                     title='Cursor',
-                    description=force_text(self.cursor_query_description)
+                    description=force_str(self.cursor_query_description)
                 )
             )
         ]
@@ -863,7 +944,7 @@ class CursorPagination(BasePagination):
                     location='query',
                     schema=coreschema.Integer(
                         title='Page size',
-                        description=force_text(self.page_size_query_description)
+                        description=force_str(self.page_size_query_description)
                     )
                 )
             )
@@ -875,7 +956,7 @@ class CursorPagination(BasePagination):
                 'name': self.cursor_query_param,
                 'required': False,
                 'in': 'query',
-                'description': force_text(self.cursor_query_description),
+                'description': force_str(self.cursor_query_description),
                 'schema': {
                     'type': 'integer',
                 },
@@ -887,7 +968,7 @@ class CursorPagination(BasePagination):
                     'name': self.page_size_query_param,
                     'required': False,
                     'in': 'query',
-                    'description': force_text(self.page_size_query_description),
+                    'description': force_str(self.page_size_query_description),
                     'schema': {
                         'type': 'integer',
                     },

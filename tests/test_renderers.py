@@ -631,8 +631,12 @@ class BrowsableAPIRendererTests(URLPatternsTestCase):
         def list_action(self, request):
             raise NotImplementedError
 
+    class AuthExampleViewSet(ExampleViewSet):
+        permission_classes = [permissions.IsAuthenticated]
+
     router = SimpleRouter()
     router.register('examples', ExampleViewSet, basename='example')
+    router.register('auth-examples', AuthExampleViewSet, basename='auth-example')
     urlpatterns = [url(r'^api/', include(router.urls))]
 
     def setUp(self):
@@ -656,6 +660,12 @@ class BrowsableAPIRendererTests(URLPatternsTestCase):
         assert 'id="extra-actions-menu"' in resp.content.decode()
         assert '/api/examples/list_action/' in resp.content.decode()
         assert '>Extra list action<' in resp.content.decode()
+
+    def test_extra_actions_dropdown_not_authed(self):
+        resp = self.client.get('/api/unauth-examples/', HTTP_ACCEPT='text/html')
+        assert 'id="extra-actions-menu"' not in resp.content.decode()
+        assert '/api/examples/list_action/' not in resp.content.decode()
+        assert '>Extra list action<' not in resp.content.decode()
 
 
 class AdminRendererTests(TestCase):
@@ -731,6 +741,11 @@ class AdminRendererTests(TestCase):
         class DummyGenericViewsetLike(APIView):
             lookup_field = 'test'
 
+            def get(self, request):
+                response = Response()
+                response.view = self
+                return response
+
             def reverse_action(view, *args, **kwargs):
                 self.assertEqual(kwargs['kwargs']['test'], 1)
                 return '/example/'
@@ -739,7 +754,7 @@ class AdminRendererTests(TestCase):
         view = DummyGenericViewsetLike.as_view()
         request = factory.get('/')
         response = view(request)
-        view = response.renderer_context['view']
+        view = response.view
 
         self.assertEqual(self.renderer.get_result_url({'test': 1}, view), '/example/')
         self.assertIsNone(self.renderer.get_result_url({}, view))
@@ -750,11 +765,16 @@ class AdminRendererTests(TestCase):
         class DummyView(APIView):
             lookup_field = 'test'
 
+            def get(self, request):
+                response = Response()
+                response.view = self
+                return response
+
         # get the view instance instead of the view function
         view = DummyView.as_view()
         request = factory.get('/')
         response = view(request)
-        view = response.renderer_context['view']
+        view = response.view
 
         self.assertIsNone(self.renderer.get_result_url({'test': 1}, view))
         self.assertIsNone(self.renderer.get_result_url({}, view))

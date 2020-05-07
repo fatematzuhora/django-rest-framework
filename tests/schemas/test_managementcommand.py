@@ -1,4 +1,6 @@
 import io
+import os
+import tempfile
 
 import pytest
 from django.conf.urls import url
@@ -20,6 +22,16 @@ class FooView(APIView):
 urlpatterns = [
     url(r'^$', FooView.as_view())
 ]
+
+
+class CustomSchemaGenerator:
+    SCHEMA = {"key": "value"}
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def get_schema(self, **kwargs):
+        return self.SCHEMA
 
 
 @override_settings(ROOT_URLCONF=__name__)
@@ -45,7 +57,7 @@ class GenerateSchemaTests(TestCase):
                      '--description=Sample description',
                      stdout=self.out)
         # Check valid YAML was output.
-        schema = yaml.load(self.out.getvalue())
+        schema = yaml.safe_load(self.out.getvalue())
         assert schema['openapi'] == '3.0.2'
 
     def test_renders_openapi_json_schema(self):
@@ -55,6 +67,28 @@ class GenerateSchemaTests(TestCase):
         # Check valid JSON was output.
         out_json = json.loads(self.out.getvalue())
         assert out_json['openapi'] == '3.0.2'
+
+    def test_accepts_custom_schema_generator(self):
+        call_command('generateschema',
+                     '--generator_class={}.{}'.format(__name__, CustomSchemaGenerator.__name__),
+                     stdout=self.out)
+        out_json = yaml.safe_load(self.out.getvalue())
+        assert out_json == CustomSchemaGenerator.SCHEMA
+
+    def test_writes_schema_to_file_on_parameter(self):
+        fd, path = tempfile.mkstemp()
+        try:
+            call_command('generateschema', '--file={}'.format(path), stdout=self.out)
+            # nothing on stdout
+            assert not self.out.getvalue()
+
+            call_command('generateschema', stdout=self.out)
+            expected_out = self.out.getvalue()
+            # file output identical to stdout output
+            with os.fdopen(fd) as fh:
+                assert expected_out and fh.read() == expected_out
+        finally:
+            os.remove(path)
 
     @pytest.mark.skipif(yaml is None, reason='PyYAML is required.')
     @override_settings(REST_FRAMEWORK={'DEFAULT_SCHEMA_CLASS': 'rest_framework.schemas.AutoSchema'})

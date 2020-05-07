@@ -1,4 +1,7 @@
-source: validators.py
+---
+source:
+    - validators.py
+---
 
 # Validators
 
@@ -94,7 +97,7 @@ The validator should be applied to *serializer classes*, like so:
             validators = [
                 UniqueTogetherValidator(
                     queryset=ToDoItem.objects.all(),
-                    fields=('list', 'position')
+                    fields=['list', 'position']
                 )
             ]
 
@@ -148,8 +151,6 @@ If you want the date field to be writable the only thing worth noting is that yo
 If you want the date field to be visible, but not editable by the user, then set `read_only=True` and additionally set a `default=...` argument.
 
     published = serializers.DateTimeField(read_only=True, default=timezone.now)
-
-The field will not be writable to the user, but the default value will still be passed through to the `validated_data`.
 
 #### Using with a hidden date field.
 
@@ -217,11 +218,11 @@ in the `.validate()` method, or else in the view.
 For example:
 
     class BillingRecordSerializer(serializers.ModelSerializer):
-        def validate(self, data):
+        def validate(self, attrs):
             # Apply custom validation either here, or in the view.
 
         class Meta:
-            fields = ('client', 'date', 'amount')
+            fields = ['client', 'date', 'amount']
             extra_kwargs = {'client': {'required': False}}
             validators = []  # Remove a default "unique together" constraint.
 
@@ -290,13 +291,17 @@ To write a class-based validator, use the `__call__` method. Class-based validat
                 message = 'This field must be a multiple of %d.' % self.base
                 raise serializers.ValidationError(message)
 
-#### Using `set_context()`
+#### Accessing the context
 
-In some advanced cases you might want a validator to be passed the serializer field it is being used with as additional context. You can do so by declaring a `set_context` method on a class-based validator.
+In some advanced cases you might want a validator to be passed the serializer
+field it is being used with as additional context. You can do so by setting
+a `requires_context = True` attribute on the validator. The `__call__` method
+will then be called with the `serializer_field`
+or `serializer` as an additional argument.
 
-    def set_context(self, serializer_field):
-        # Determine if this is an update or a create operation.
-        # In `__call__` we can then use that information to modify the validation behavior.
-        self.is_update = serializer_field.parent.instance is not None
+    requires_context = True
+
+    def __call__(self, value, serializer_field):
+        ...
 
 [cite]: https://docs.djangoproject.com/en/stable/ref/validators/
