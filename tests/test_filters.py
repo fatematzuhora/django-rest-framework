@@ -1,7 +1,6 @@
 import datetime
 from importlib import reload as reload_module
 
-import django
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
@@ -191,7 +190,6 @@ class SearchFilterTests(TestCase):
 
         assert terms == ['asdf']
 
-    @pytest.mark.skipif(django.VERSION[:2] < (2, 2), reason="requires django 2.2 or higher")
     def test_search_field_with_additional_transforms(self):
         from django.test.utils import register_lookup
 
@@ -405,6 +403,21 @@ class SearchFilterAnnotatedFieldTests(TestCase):
         response = view(request)
         assert len(response.data) == 1
         assert response.data[0]['title_text'] == 'ABCDEF'
+
+    def test_must_call_distinct_subsequent_m2m_fields(self):
+        f = filters.SearchFilter()
+
+        queryset = SearchFilterModelM2M.objects.annotate(
+            title_text=Upper(
+                Concat(models.F('title'), models.F('text'))
+            )
+        ).all()
+
+        # Sanity check that m2m must call distinct
+        assert f.must_call_distinct(queryset, ['attributes'])
+
+        # Annotated field should not prevent m2m must call distinct
+        assert f.must_call_distinct(queryset, ['title_text', 'attributes'])
 
 
 class OrderingFilterModel(models.Model):
